@@ -59,6 +59,6 @@ Protocol Buffer 定义位于 `engine.proto`。
 ## 关键实现细节
 
 - 订单撮合采用价格-时间优先原则：优先最佳价格，然后是最早的订单
-- 来自 `github.com/Pantelwar/binarytree` 的二叉树结构实现了 O(log n) 操作复杂度
+- 来自 `github.com/goovo/binarytree` 的二叉树结构实现了 O(log n) 操作复杂度
 - 所有财务计算使用十进制算术，避免浮点数精度问题
 - 每个交易对都在 Engine 的 `book` 映射中有自己独立的 OrderBook 实例
