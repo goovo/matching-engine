@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+service Engine {
+    rpc Process(Order) returns (OutputOrders); 
+    rpc ProcessMarket(Order) returns (OutputOrders); 
+    rpc Cancel(Order) returns (Order);
+    rpc FetchBook(BookInput) returns (BookOutput);
+}
+
+message Order {
+    Side Type = 1 [json_name = "type"];
+    string ID  = 2 [json_name = "id"];
+    string Amount = 3 [json_name = "amount"];
+    string Price = 4 [json_name = "price"];
+    string Pair = 5 [json_name = "pair"];
+}
+
+message OutputOrders {
+    string  OrdersProcessed = 1 [json_name = "orders_processed"];
+    string PartialOrder = 2 [json_name = "partial_order"];
+}
+
+enum Side {
+    buy = 0;
+    sell = 1;
+}
+
+message BookInput {
+    string pair = 1;
+    int64 limit = 2;
+}
+
+message BookArray {
+    repeated string price_amount = 1;
+}
+
+message BookOutput {
+    repeated BookArray Buys = 1; 
+    repeated BookArray Sells = 2; 
+}
