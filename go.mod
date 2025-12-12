@@ -4,8 +4,8 @@ module github.com/goovo/matching-engine
 go 1.23
 
 require (
-	github.com/Pantelwar/binarytree v1.0.0
 	github.com/golang/protobuf v1.5.2
+	github.com/goovo/binarytree v0.0.0-20251212032555-0949d8c84ab0
 	github.com/shopspring/decimal v1.3.1
 	google.golang.org/grpc v1.48.0
 )

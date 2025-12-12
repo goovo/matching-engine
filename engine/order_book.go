@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"sync"
  
-	"github.com/Pantelwar/binarytree"
+	"github.com/goovo/binarytree"
 	"github.com/goovo/matching-engine/util"
 )
 
