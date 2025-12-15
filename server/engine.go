@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
- 
+	"sync"
+	"time"
+
 	"github.com/goovo/matching-engine/engine"
 	engineGrpc "github.com/goovo/matching-engine/engineGrpc"
 	"github.com/goovo/matching-engine/util"
@@ -14,6 +16,7 @@ import (
 // Engine 引擎服务实现，维护每个交易对的订单簿
 type Engine struct {
 	book map[string]*engine.OrderBook
+	mu   sync.RWMutex
 }
 
 // NewEngine 返回 Engine 实例
@@ -23,12 +26,13 @@ func NewEngine() *Engine {
 
 // Process 实现 EngineServer 接口：处理限价单
 func (e *Engine) Process(ctx context.Context, req *engineGrpc.Order) (*engineGrpc.OutputOrders, error) {
+	start := time.Now() // 中文注释：记录方法开始时间用于统计耗时
 	bigZero, _ := util.NewDecimalFromString("0.0")
-	orderString := fmt.Sprintf("{\"id\":\"%s\", \"type\": \"%s\", \"amount\": \"%s\", \"price\": \"%s\" }", req.GetID(), req.GetType(), req.GetAmount(), req.GetPrice())
+	orderString := fmt.Sprintf("{\"id\":\"%s\", \"type\": \"%s\", \"amount\": \"%s\", \"price\": \"%s\" }", req.GetID(), req.GetType().String(), req.GetAmount(), req.GetPrice())
 
 	var order engine.Order
 	// 解析消息体
-	fmt.Println("Orderstring =: ", orderString)
+	// fmt.Println("Orderstring =: ", orderString)
 	err := order.FromJSON([]byte(orderString))
 	if err != nil {
 		fmt.Println("JSON Parse Error =: ", err)
@@ -46,20 +50,24 @@ func (e *Engine) Process(ctx context.Context, req *engineGrpc.Order) (*engineGrp
 	}
 
 	var pairBook *engine.OrderBook
+	e.mu.Lock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
 	} else {
 		pairBook = engine.NewOrderBook()
 		e.book[req.GetPair()] = pairBook
 	}
+	e.mu.Unlock()
 
 	ordersProcessed, partialOrder := pairBook.Process(order)
+	// 中文注释：统计限价撮合的成交笔数与耗时
+	IncProcess(start, len(ordersProcessed))
 
 	ordersProcessedString, err := json.Marshal(ordersProcessed)
 
 	// if order.Type.String() == "sell" {
-	fmt.Println("pair:", req.GetPair())
-	fmt.Println(pairBook)
+	// fmt.Println("pair:", req.GetPair())
+	// fmt.Println(pairBook)
 	// }
 
 	if err != nil {
@@ -81,6 +89,7 @@ func (e *Engine) Process(ctx context.Context, req *engineGrpc.Order) (*engineGrp
 
 // Cancel 实现 EngineServer 接口：撤单
 func (e *Engine) Cancel(ctx context.Context, req *engineGrpc.Order) (*engineGrpc.Order, error) {
+	start := time.Now() // 中文注释：记录方法开始时间用于统计耗时
 	order := &engine.Order{ID: req.GetID()}
 
 	if order.ID == "" {
@@ -94,17 +103,19 @@ func (e *Engine) Cancel(ctx context.Context, req *engineGrpc.Order) (*engineGrpc
 	}
 
 	var pairBook *engine.OrderBook
+	e.mu.Lock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
 	} else {
 		pairBook = engine.NewOrderBook()
 		e.book[req.GetPair()] = pairBook
 	}
+	e.mu.Unlock()
 
 	order = pairBook.CancelOrder(order.ID)
 
-	fmt.Println("pair:", req.GetPair())
-	fmt.Println(pairBook)
+	// fmt.Println("pair:", req.GetPair())
+	// fmt.Println(pairBook)
 
 	if order == nil {
 		return nil, errors.New("NoOrderPresent")
@@ -117,13 +128,17 @@ func (e *Engine) Cancel(ctx context.Context, req *engineGrpc.Order) (*engineGrpc
 	orderEngine.Price = order.Price.String()
 	orderEngine.Type = engineGrpc.Side(engineGrpc.Side_value[order.Type.String()])
 
+	// 中文注释：统计撤单的耗时
+	IncCancel(start)
+
 	return orderEngine, nil
 }
 
 // ProcessMarket 实现 EngineServer 接口：处理市价单
 func (e *Engine) ProcessMarket(ctx context.Context, req *engineGrpc.Order) (*engineGrpc.OutputOrders, error) {
+	start := time.Now() // 中文注释：记录方法开始时间用于统计耗时
 	bigZero, _ := util.NewDecimalFromString("0.0")
-	orderString := fmt.Sprintf("{\"id\":\"%s\", \"type\": \"%s\", \"amount\": \"%s\", \"price\": \"%s\" }", req.GetID(), req.GetType(), req.GetAmount(), req.GetPrice())
+	orderString := fmt.Sprintf("{\"id\":\"%s\", \"type\": \"%s\", \"amount\": \"%s\", \"price\": \"%s\" }", req.GetID(), req.GetType().String(), req.GetAmount(), req.GetPrice())
 
 	var order engine.Order
 	// 解析消息体
@@ -145,20 +160,24 @@ func (e *Engine) ProcessMarket(ctx context.Context, req *engineGrpc.Order) (*eng
 	}
 
 	var pairBook *engine.OrderBook
+	e.mu.Lock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
 	} else {
 		pairBook = engine.NewOrderBook()
 		e.book[req.GetPair()] = pairBook
 	}
+	e.mu.Unlock()
 
 	ordersProcessed, partialOrder := pairBook.ProcessMarket(order)
+	// 中文注释：统计市价撮合的成交笔数与耗时
+	IncProcessMarket(start, len(ordersProcessed))
 
 	ordersProcessedString, err := json.Marshal(ordersProcessed)
 
 	// if order.Type.String() == "sell" {
-	fmt.Println("pair:", req.GetPair())
-	fmt.Println(pairBook)
+	// fmt.Println("pair:", req.GetPair())
+	// fmt.Println(pairBook)
 	// }
 
 	if err != nil {
@@ -175,19 +194,23 @@ func (e *Engine) ProcessMarket(ctx context.Context, req *engineGrpc.Order) (*eng
 
 // FetchBook 实现 EngineServer 接口：查询订单簿
 func (e *Engine) FetchBook(ctx context.Context, req *engineGrpc.BookInput) (*engineGrpc.BookOutput, error) {
+	start := time.Now() // 中文注释：记录方法开始时间用于统计耗时
 	if req.GetPair() == "" {
 		fmt.Println("Invalid pair")
 		return nil, errors.New("Invalid pair")
 	}
 
 	var pairBook *engine.OrderBook
+	e.mu.Lock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
 	} else {
+		e.mu.Unlock()
 		return nil, errors.New("Invalid pair")
 	}
+	e.mu.Unlock()
 
-	fmt.Println(pairBook)
+	// fmt.Println(pairBook)
 	book := pairBook.GetOrders(req.GetLimit())
 
 	result := &engineGrpc.BookOutput{Buys: []*engineGrpc.BookArray{}, Sells: []*engineGrpc.BookArray{}}
@@ -227,5 +250,7 @@ func (e *Engine) FetchBook(ctx context.Context, req *engineGrpc.BookInput) (*eng
 
 		result.Sells = append(result.Sells, arr)
 	}
+	// 中文注释：统计查询订单簿的耗时
+	IncFetchBook(start)
 	return result, nil
 }

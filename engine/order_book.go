@@ -97,6 +97,9 @@ type BookArray struct {
 
 // GetOrders 返回价格与数量的二维数组（买盘倒序、卖盘正序）
 func (ob *OrderBook) GetOrders(limit int64) *BookArray {
+	ob.mutex.Lock()
+	defer ob.mutex.Unlock()
+
 	buys := [][]string{}
 	ob.BuyTree.Root.InReverseOrderTraverse(func(i float64) {
 		node := ob.BuyTree.Root.SearchSubTree(i)
@@ -253,9 +256,9 @@ func (ob *OrderBook) addBuyOrder(order Order) {
 		ob.BuyTree.Insert(searchNodePrice, orderTypeObj)
 	}
 	// fmt.Println("ors", orderNode)
-	ob.mutex.Lock()
+	// ob.mutex.Lock()
 	ob.orders[order.ID] = orderNode
-	ob.mutex.Unlock()
+	// ob.mutex.Unlock()
 }
 
 // addSellOrder 将卖单加入订单簿
@@ -288,9 +291,9 @@ func (ob *OrderBook) addSellOrder(order Order) {
 		orderNode, _ = orderTypeObj.AddOrderInQueue(order)
 		ob.SellTree.Insert(searchNodePrice, orderTypeObj)
 	}
-	ob.mutex.Lock()
+	// ob.mutex.Lock()
 	ob.orders[order.ID] = orderNode
-	ob.mutex.Unlock()
+	// ob.mutex.Unlock()
 }
 
 func (ob *OrderBook) removeBuyNode(key float64) error {

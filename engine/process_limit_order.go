@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"fmt"
- 
+	// "fmt"
+
 	"github.com/goovo/binarytree"
 	"github.com/goovo/matching-engine/util"
 )
@@ -11,6 +11,9 @@ var decimalZero, _ = util.NewDecimalFromString("0.0")
 
 // Process 执行限价单撮合流程
 func (ob *OrderBook) Process(order Order) ([]*Order, *Order) {
+	ob.mutex.Lock()
+	defer ob.mutex.Unlock()
+
 	if order.Type == Buy {
 		// return ob.processOrderB(order)
 		return ob.commonProcess(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
@@ -58,8 +61,8 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 		// var t []Trade
 		var ordersProcessed []*Order
 		noMoreOrders, ordersProcessed, partialOrder = ob.processLimit(&order, partialOrder, maxNode.Data.(*OrderType).Tree, orderOriginalAmount) //, orderPrice)
-		fmt.Printf("\npartialOrder in between: %#v\n", partialOrder)
-		fmt.Printf("noMoreOrders: %#v\n\n", noMoreOrders)
+		// fmt.Printf("\npartialOrder in between: %#v\n", partialOrder)
+		// fmt.Printf("noMoreOrders: %#v\n\n", noMoreOrders)
 		allOrdersProcessed = append(allOrdersProcessed, ordersProcessed...)
 		// trades = append(trades, t...)
 
@@ -76,7 +79,7 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 	// if partialOrder.Amount == nil {
 	// 	partialOrder = nil
 	// }
-	fmt.Printf("partialOrder final: %#v\n", partialOrder)
+	// fmt.Printf("partialOrder final: %#v\n", partialOrder)
 
 	return allOrdersProcessed, partialOrder
 }
@@ -92,7 +95,7 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 	noMoreOrders := false
 	var ordersProcessed []*Order
 	// var partialOrder *Order
-	fmt.Printf("partialOrder start: %#v\n", partialOrder)
+	// fmt.Printf("partialOrder start: %#v\n", partialOrder)
 
 	// var partialOrder *Order
 	if maxNode == nil {
@@ -118,14 +121,14 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 		}
 		if order.Type == Sell {
 			if orderPrice > maxNode.Key {
-				fmt.Println("adding sellnode directly")
+				// fmt.Println("adding sellnode directly")
 				noMoreOrders = true
 				// return trades, noMoreOrders, nil, nil
 				return noMoreOrders, ordersProcessed, partialOrder
 			}
 		} else {
 			if orderPrice < maxNode.Key {
-				fmt.Println("adding buynode directly")
+				// fmt.Println("adding buynode directly")
 				noMoreOrders = true
 				// return trades, noMoreOrders, nil, nil
 				return noMoreOrders, ordersProcessed, partialOrder
@@ -180,9 +183,9 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 				// orderComplete = true
 
 				// ele.Amount = 0
-				ob.mutex.Lock()
+				// ob.mutex.Lock()
 				delete(ob.orders, ele.ID)
-				ob.mutex.Unlock()
+				// ob.mutex.Unlock()
 
 				break
 			} else {
@@ -199,9 +202,9 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: ele.Amount, Price: ele.Price})
 
 				order.Amount = order.Amount.Sub(ele.Amount)
-				ob.mutex.Lock()
+				// ob.mutex.Lock()
 				delete(ob.orders, ele.ID)
-				ob.mutex.Unlock()
+				// ob.mutex.Unlock()
 			}
 		}
 

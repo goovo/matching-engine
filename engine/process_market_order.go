@@ -7,6 +7,9 @@ import (
 
 // ProcessMarket 执行市价单撮合流程
 func (ob *OrderBook) ProcessMarket(order Order) ([]*Order, *Order) {
+	ob.mutex.Lock()
+	defer ob.mutex.Unlock()
+
 	if order.Type == Buy {
 		// return ob.processOrderB(order)
 		return ob.commonProcessMarket(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
@@ -160,9 +163,9 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 				// orderComplete = true
 
 				// ele.Amount = 0
-				ob.mutex.Lock()
+				// ob.mutex.Lock()
 				delete(ob.orders, ele.ID)
-				ob.mutex.Unlock()
+				// ob.mutex.Unlock()
 
 				break
 			} else {
@@ -175,9 +178,9 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: ele.Amount, Price: ele.Price})
 
 				order.Amount = order.Amount.Sub(ele.Amount)
-				ob.mutex.Lock()
+				// ob.mutex.Lock()
 				delete(ob.orders, ele.ID)
-				ob.mutex.Unlock()
+				// ob.mutex.Unlock()
 			}
 		}
 

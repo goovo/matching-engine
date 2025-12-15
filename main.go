@@ -23,6 +23,9 @@ func main() {
 
 	reflection.Register(gs)
 
+	// 中文注释：启动性能指标后台打印，每秒输出 QPS/TPS/平均延迟
+	server.StartMetrics()
+
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		e := fmt.Errorf("Unable to listen server, err: %v", err)

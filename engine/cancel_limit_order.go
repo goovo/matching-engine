@@ -3,8 +3,9 @@ package engine
 // CancelOrder 从订单簿移除该订单并返回被移除的订单
 func (ob *OrderBook) CancelOrder(id string) *Order {
 	ob.mutex.Lock()
+	defer ob.mutex.Unlock()
+
 	orderNode := ob.orders[id]
-	ob.mutex.Unlock()
 
 	if orderNode == nil {
 		return nil
@@ -20,9 +21,9 @@ func (ob *OrderBook) CancelOrder(id string) *Order {
 			if len(orderNode.Orders) == 0 {
 				ob.removeOrder(order)
 			}
-			ob.mutex.Lock()
+			// ob.mutex.Lock()
 			delete(ob.orders, id)
-			ob.mutex.Unlock()
+			// ob.mutex.Unlock()
 			return order
 		}
 	}
