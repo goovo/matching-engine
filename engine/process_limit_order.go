@@ -10,19 +10,20 @@ import (
 var decimalZero, _ = util.NewDecimalFromString("0.0")
 
 // Process 执行限价单撮合流程
-func (ob *OrderBook) Process(order Order) ([]*Order, *Order) {
+func (ob *OrderBook) Process(order Order) {
 	ob.mutex.Lock()
 	defer ob.mutex.Unlock()
 
 	if order.Type == Buy {
 		// return ob.processOrderB(order)
-		return ob.commonProcess(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
+		ob.commonProcess(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
+	} else {
+		// return ob.processOrderS(order)
+		ob.commonProcess(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
 	}
-	// return ob.processOrderS(order)
-	return ob.commonProcess(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
 }
 
-func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) ([]*Order, *Order) {
+func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) {
 	var maxNode *binarytree.BinaryNode
 	if order.Type == Sell {
 		maxNode = tree.Max()
@@ -30,16 +31,16 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 		maxNode = tree.Min()
 	}
 	if maxNode == nil {
-		// fmt.Println("adding node pending", order.Price)
 		add(order)
-		return nil, nil
+		return
 	}
-	// fmt.Println("maxNode", maxNode.Key, maxNode.Data.(*OrderType).Tree.Root.Key)
+
 	count := 0
 	noMoreOrders := false
-	var allOrdersProcessed []*Order
-	var partialOrder *Order
-	orderOriginalAmount := order.Amount.Clone() // Clone
+	
+	// 不需要 Clone 了，因为不需要返回 partialOrder
+	// orderOriginalAmount := order.Amount.Clone() 
+	
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
 		count++
 		if order.Type == Sell {
@@ -49,7 +50,6 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 		}
 		if maxNode == nil || noMoreOrders {
 			if order.Amount.Cmp(decimalZero) == 1 {
-				// fmt.Println("adding sell node pending")
 				add(order)
 				break
 			} else {
@@ -57,20 +57,15 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 			}
 		}
 		
-		var ordersProcessed []*Order
-		noMoreOrders, ordersProcessed, partialOrder = ob.processLimit(&order, partialOrder, maxNode.Data.(*OrderType).Tree, orderOriginalAmount) //, orderPrice)
+		noMoreOrders = ob.processLimit(&order, maxNode.Data.(*OrderType).Tree)
 		
-		allOrdersProcessed = append(allOrdersProcessed, ordersProcessed...)
-
 		if maxNode.Data.(*OrderType).Tree.Root == nil {
 			remove(maxNode.Key)
 		}
 	}
-
-	return allOrdersProcessed, partialOrder
 }
 
-func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.BinaryTree, orderOriginalAmount *util.StandardBigDecimal) (bool, []*Order, *Order) {
+func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) bool {
 	orderPrice := order.Price.Float64()
 	var maxNode *binarytree.BinaryNode
 	if order.Type == Sell {
@@ -79,10 +74,9 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 		maxNode = tree.Min()
 	}
 	noMoreOrders := false
-	var ordersProcessed []*Order
 	
 	if maxNode == nil {
-		return noMoreOrders, nil, nil
+		return noMoreOrders
 	}
 	
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
@@ -93,22 +87,18 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 		}
 		
 		if maxNode == nil || noMoreOrders {
-			if order.Amount.Cmp(decimalZero) == 1 {
-				partialOrder = NewOrder(order.ID, order.Type, order.Amount, order.Price)
-				break
-			} else {
-				break
-			}
+			// 这里不需要处理 break，外层循环会处理
+			break
 		}
 		if order.Type == Sell {
 			if orderPrice > maxNode.Key {
 				noMoreOrders = true
-				return noMoreOrders, ordersProcessed, partialOrder
+				return noMoreOrders
 			}
 		} else {
 			if orderPrice < maxNode.Key {
 				noMoreOrders = true
-				return noMoreOrders, ordersProcessed, partialOrder
+				return noMoreOrders
 			}
 		}
 
@@ -132,23 +122,24 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 			}
 
 			if ele.Amount.Cmp(order.Amount) == 1 {
+				// Case 1: Maker 量 > Taker 量 (部分成交)
 				// 使用原地修改
 				nodeData.Volume.SubMut(order.Amount)
-
 				ele.Amount.SubMut(order.Amount)
 
-				partialOrder = NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price)
-				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, order.Price))
+				// 触发成交事件
+				// Maker: ele, Taker: order
+				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, order.Amount.Val)
 
 				order.Amount.SetZero() // 优化：原地置零
 				
 				noMoreOrders = true
 				break
 			} else if ele.Amount.Cmp(order.Amount) == 0 {
-				// 必须先创建副本，因为 removeOrder 后 ele 指针可能失效或指向被复用的内存
-				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
-				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, order.Price))
-				partialOrder = nil
+				// Case 2: Maker 量 == Taker 量 (完全成交)
+				
+				// 触发成交事件
+				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
 				// 先删除 map 索引
 				delete(ob.orders, ele.ID)
@@ -161,12 +152,13 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 				currIdx = nextIdx // Move to next
 				break
 			} else {
-				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
+				// Case 3: Maker 量 < Taker 量 (Maker 吃光，Taker 还有剩)
+				
+				// 触发成交事件
+				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
 				order.Amount.SubMut(ele.Amount)
 				
-				partialOrder = NewOrder(order.ID, order.Type, order.Amount, order.Price)
-
 				delete(ob.orders, ele.ID)
 				nodeData.removeOrder(ob.Arena, currIdx)
 			}
@@ -179,5 +171,5 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 			nodeData.Release() // 回收空的 OrderNode
 		}
 	}
-	return noMoreOrders, ordersProcessed, partialOrder
+	return noMoreOrders
 }

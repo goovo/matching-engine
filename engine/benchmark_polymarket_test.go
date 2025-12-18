@@ -42,7 +42,7 @@ func generatePolyPrice(r *rand.Rand, fairPrice float64, isBuy bool) string {
 // BenchmarkPolymarketSimulation 模拟真实预测市场场景
 func BenchmarkPolymarketSimulation(b *testing.B) {
 	// 初始化订单簿
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 	
 	// 固定随机种子，保证结果可复现
 	r := rand.New(rand.NewSource(42))

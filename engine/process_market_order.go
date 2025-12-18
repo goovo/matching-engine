@@ -2,23 +2,21 @@ package engine
 
 import (
 	"github.com/goovo/binarytree"
-	"github.com/goovo/matching-engine/util"
 )
 
 // ProcessMarket 执行市价单撮合流程
-func (ob *OrderBook) ProcessMarket(order Order) ([]*Order, *Order) {
+func (ob *OrderBook) ProcessMarket(order Order) {
 	ob.mutex.Lock()
 	defer ob.mutex.Unlock()
 
 	if order.Type == Buy {
-		// return ob.processOrderB(order)
-		return ob.commonProcessMarket(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
+		ob.commonProcessMarket(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
+	} else {
+		ob.commonProcessMarket(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
 	}
-	// return ob.processOrderS(order)
-	return ob.commonProcessMarket(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
 }
 
-func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) ([]*Order, *Order) {
+func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) {
 	var maxNode *binarytree.BinaryNode
 	if order.Type == Sell {
 		maxNode = tree.Max()
@@ -26,14 +24,19 @@ func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTre
 		maxNode = tree.Min()
 	}
 	if maxNode == nil {
-		// add(order)
-		return nil, nil
+		// 市价单如果不匹配，直接丢弃或取消（IOC/FOK）
+		// 这里假设是 IOC (Immediate or Cancel)，未成交部分取消
+		if order.ID != "" {
+			// 触发取消事件（剩余全部取消）
+			ob.listener.OnOrderCancelled(order.ID)
+		}
+		return
 	}
 	count := 0
 	noMoreOrders := false
-	var allOrdersProcessed []*Order
-	var partialOrder *Order
-	orderOriginalAmount := order.Amount.Clone()
+	
+	// orderOriginalAmount := order.Amount.Clone()
+
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
 		count++
 		if order.Type == Sell {
@@ -43,31 +46,21 @@ func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTre
 		}
 		if maxNode == nil || noMoreOrders {
 			if order.Amount.Cmp(decimalZero) == 1 {
-				allOrdersProcessed = append(allOrdersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, decimalZero))
+				// 市价单未完全成交，剩余部分取消
+				ob.listener.OnOrderCancelled(order.ID)
 			}
 			break
 		}
 
-		// var t []Trade
-		var ordersProcessed []*Order
-		noMoreOrders, ordersProcessed, partialOrder = ob.processLimitMarket(&order, maxNode.Data.(*OrderType).Tree, orderOriginalAmount) //, orderPrice)
-		allOrdersProcessed = append(allOrdersProcessed, ordersProcessed...)
-		// trades = append(trades, t...)
+		noMoreOrders = ob.processLimitMarket(&order, maxNode.Data.(*OrderType).Tree)
 
 		if maxNode.Data.(*OrderType).Tree.Root == nil {
-			// node := remove(maxNode.Key)
-			// // node := ob.removeBuyNode(maxNode.Key)
-			// tree.Root = node
 			remove(maxNode.Key)
 		}
 	}
-
-	// return trades, allOrdersProcessed, partialOrder
-	return allOrdersProcessed, partialOrder
 }
 
-func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTree, orderOriginalAmount *util.StandardBigDecimal) (bool, []*Order, *Order) {
-	// orderPrice, _ := order.Price.Float64()
+func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTree) bool {
 	var maxNode *binarytree.BinaryNode
 	if order.Type == Sell {
 		maxNode = tree.Max()
@@ -75,13 +68,11 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 		maxNode = tree.Min()
 	}
 	noMoreOrders := false
-	var ordersProcessed []*Order
-	var partialOrder *Order
+	
 	if maxNode == nil {
-		// return trades, noMoreOrders, nil, nil
-		return noMoreOrders, nil, nil
+		return noMoreOrders
 	}
-	// countAdd := 0.0
+	
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
 		if order.Type == Sell {
 			maxNode = tree.Max()
@@ -92,7 +83,7 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 			break
 		}
 		
-		nodeData := maxNode.Data.(*OrderNode) //([]*Order)
+		nodeData := maxNode.Data.(*OrderNode)
 		currIdx := nodeData.Head
 		
 		for currIdx != NullIndex {
@@ -100,21 +91,19 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 			nextIdx := ele.Next // Save next
 			
 			if ele.Amount.Cmp(order.Amount) == 1 {
-				// 使用原地修改
+				// Case 1: Maker > Taker
 				nodeData.Volume.SubMut(order.Amount)
-
 				ele.Amount.SubMut(order.Amount)
 
-				partialOrder = NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price)
-				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, decimalZero))
+				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, order.Amount.Val)
 
 				order.Amount.SetZero()
 				noMoreOrders = true
 				break
 			}
 			if ele.Amount.Cmp(order.Amount) == 0 {
-				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
-				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, decimalZero))
+				// Case 2: Maker == Taker
+				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
 				order.Amount.SetZero()
 				
@@ -125,7 +114,8 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 				currIdx = nextIdx
 				break
 			} else {
-				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
+				// Case 3: Maker < Taker
+				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
 				order.Amount.SubMut(ele.Amount)
 				
@@ -142,5 +132,5 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 			nodeData.Release()
 		}
 	}
-	return noMoreOrders, ordersProcessed, partialOrder
+	return noMoreOrders
 }

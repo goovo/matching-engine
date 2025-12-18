@@ -23,12 +23,12 @@ func BenchmarkLimitMatchSimple(b *testing.B) {
 	}()
 
 	// 构建订单簿并预置卖单
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 	for i := 0; i < b.N; i++ {
 		sid := fmt.Sprintf("s-%d", i)                      // 卖单ID
 		amt := DecimalBig("1.0")                           // 卖单数量
 		prc := DecimalBig("100.0")                         // 卖单价格
-		_, _ = ob.Process(*NewOrder(sid, Sell, amt, prc))  // 预置卖单
+		ob.Process(*NewOrder(sid, Sell, amt, prc))  // 预置卖单
 	}
 
 	b.ReportAllocs()
@@ -39,7 +39,7 @@ func BenchmarkLimitMatchSimple(b *testing.B) {
 		bid := fmt.Sprintf("b-%d", i)                  // 买单ID
 		amt := DecimalBig("1.0")                       // 买单数量
 		prc := DecimalBig("100.0")                      // 买单价格（与卖单一致保证撮合）
-		_, _ = ob.Process(*NewOrder(bid, Buy, amt, prc)) // 进行撮合
+		ob.Process(*NewOrder(bid, Buy, amt, prc)) // 进行撮合
 	}
 }
 
@@ -59,12 +59,12 @@ func BenchmarkMarketMatchSimple(b *testing.B) {
 	}()
 
 	// 构建订单簿并预置卖单
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 	for i := 0; i < b.N; i++ {
 		sid := fmt.Sprintf("s-%d", i)                      // 卖单ID
 		amt := DecimalBig("1.0")                           // 卖单数量
 		prc := DecimalBig("100.0")                         // 卖单价格
-		_, _ = ob.Process(*NewOrder(sid, Sell, amt, prc))  // 预置卖单
+		ob.Process(*NewOrder(sid, Sell, amt, prc))  // 预置卖单
 	}
 
 	b.ReportAllocs()
@@ -75,7 +75,7 @@ func BenchmarkMarketMatchSimple(b *testing.B) {
 		bid := fmt.Sprintf("mb-%d", i)                          // 市价买单ID
 		amt := DecimalBig("1.0")                                 // 市价买单数量
 		zero := DecimalBig("0.0")                                 // 市价单价格字段置零
-		_, _ = ob.ProcessMarket(*NewOrder(bid, Buy, amt, zero))   // 进行撮合
+		ob.ProcessMarket(*NewOrder(bid, Buy, amt, zero))   // 进行撮合
 	}
 }
 
@@ -93,7 +93,7 @@ func BenchmarkCancelOrder(b *testing.B) {
 		_ = devnull.Close()
 	}()
 
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 	ids := make([]string, 0, b.N)
 	
 	// 预置 b.N 个订单在同一价格档位
@@ -103,7 +103,7 @@ func BenchmarkCancelOrder(b *testing.B) {
 		ids = append(ids, id)
 		amt := DecimalBig("1.0")
 		prc := DecimalBig("100.0")
-		_, _ = ob.Process(*NewOrder(id, Buy, amt, prc))
+		ob.Process(*NewOrder(id, Buy, amt, prc))
 	}
 
 	// 打乱 ID 顺序以模拟随机撤单

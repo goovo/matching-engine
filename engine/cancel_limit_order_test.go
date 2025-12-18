@@ -17,7 +17,7 @@ func TestCancelOrder(t *testing.T) {
 		{NewOrder("s3", Sell, DecimalBig("11.0"), DecimalBig("9000.0"))},
 		{NewOrder("s4", Sell, DecimalBig("1.0"), DecimalBig("7500.0"))},
 	}
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 
 	for _, tt := range tests {
 		if tt.input.Type == Buy {

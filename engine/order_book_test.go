@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewOrderBook(t *testing.T) {
-	t.Log(NewOrderBook())
+	t.Log(NewOrderBook(nil))
 }
 
 func DecimalBig(val string) *util.StandardBigDecimal {
@@ -27,7 +27,7 @@ func TestAddOrderInBook(t *testing.T) {
 		{NewOrder("b4", Buy, DecimalBig("1.0"), DecimalBig("7000.0"))},
 	}
 
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 
 	for _, tt := range tests {
 		if tt.input.Type == Buy {
@@ -67,7 +67,7 @@ func TestRemoveOrderNodeFromBook(t *testing.T) {
 		{NewOrder("s3", Sell, DecimalBig("10.0"), DecimalBig("7000.0"))},
 		{NewOrder("b4", Buy, DecimalBig("1.0"), DecimalBig("7000.0"))},
 	}
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 
 	for _, tt := range tests {
 		if tt.input.Type == Buy {
@@ -114,7 +114,7 @@ func TestRemoveOrderFromBook(t *testing.T) {
 		{NewOrder("s3", Sell, DecimalBig("10.0"), DecimalBig("7000.0"))},
 		{NewOrder("b4", Buy, DecimalBig("1.0"), DecimalBig("7000.0"))},
 	}
-	ob := NewOrderBook()
+	ob := NewOrderBook(nil)
 
 	for _, tt := range tests {
 		if tt.input.Type == Buy {
@@ -201,7 +201,7 @@ func TestString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		ob := NewOrderBook()
+		ob := NewOrderBook(nil)
 		for _, o := range tt.input {
 			ob.Process(*o)
 		}

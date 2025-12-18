@@ -19,6 +19,7 @@ type OrderBook struct {
 	orders          map[string]IndexType // orderID -> Arena Index
 	Arena           *OrderArena          // 内存管理器
 	mutex           *sync.Mutex
+	listener        MatchingListener     // 事件回调接口
 }
 
 // Book 订单簿序列化结构
@@ -34,10 +35,6 @@ type orderinfo struct {
 
 // MarshalJSON 实现 json.Marshaler 接口
 func (ob *OrderBook) MarshalJSON() ([]byte, error) {
-	// 由于 MarshalJSON 无法直接获取 Arena，这里我们只能通过遍历树来获取信息
-	// 且 OrderNode 也不再支持直接 MarshalJSON (因为缺少 Arena)
-	// 所以我们需要在这里手动构建数据
-	
 	buys := []orderinfo{}
 	ob.BuyTree.Root.InOrderTraverse(func(i float64) {
 		node := ob.BuyTree.Root.SearchSubTree(i)
@@ -58,16 +55,7 @@ func (ob *OrderBook) MarshalJSON() ([]byte, error) {
 			b.Price = util.NewDecimalFromFloat(i)
 			subNode := node.Data.(*OrderType).Tree.Root.SearchSubTree(i)
 			b.Amount = subNode.Data.(*OrderNode).Volume
-			sells = append(sells, b) // 注意原代码这里有个 bug 也是 append 到 buys? 不，原代码是 sells = append(sells, b) 但变量名可能写错，检查一下
-			// 原代码：buys = append(sells, b) -> 这里的变量赋值有问题？
-			// 原代码是 buys = append(sells, b) 这是一个 bug! 它把 sells 的内容 append 到 buys (类型不匹配) 或者其实是想 append 到 sells?
-			// 原代码：buys = append(sells, b) 实际上是把 sells 当作 prefix，append b，然后赋值给 buys? 不对，类型不匹配。
-			// 仔细看原代码： buys = append(sells, b)
-			// buys 是 []orderinfo, sells 是 []orderinfo
-			// 所以它返回了一个新的切片，包含了 sells 的内容和 b。然后赋值给 buys。
-			// 这绝对是个 bug，应该赋值给 sells。
-			// 修复它：
-			// sells = append(sells, b)
+			sells = append(sells, b)
 		})
 	})
 
@@ -130,7 +118,6 @@ func (ob *OrderBook) GetOrders(limit int64) *BookArray {
 		})
 	})
 
-	// res := ob.GetOrders()
 	return &BookArray{
 		Buys:  buys,
 		Sells: sells,
@@ -181,11 +168,16 @@ func (ob *OrderBook) String() string {
 }
 
 // NewOrderBook 返回新的订单簿
-func NewOrderBook() *OrderBook {
+// listener: 事件回调接口，如果为 nil 则使用 NoOpListener
+func NewOrderBook(listener MatchingListener) *OrderBook {
 	bTree := binarytree.NewBinaryTree()
 	sTree := binarytree.NewBinaryTree()
 	bTree.ToggleSplay(true)
 	sTree.ToggleSplay(true)
+
+	if listener == nil {
+		listener = &NoOpListener{}
+	}
 
 	return &OrderBook{
 		BuyTree:         bTree,
@@ -194,6 +186,7 @@ func NewOrderBook() *OrderBook {
 		orders:          make(map[string]IndexType),
 		Arena:           NewOrderArena(100000), // 默认 10w 容量
 		mutex:           &sync.Mutex{},
+		listener:        listener,
 	}
 }
 
@@ -203,8 +196,6 @@ func (ob *OrderBook) addBuyOrder(order Order) {
 	idx := ob.Arena.Alloc()
 	storedOrder := ob.Arena.Get(idx)
 	*storedOrder = order // Copy struct
-	// 确保 ID 正确，虽然 copy 应该已经处理了
-	// 初始化链接
 	storedOrder.Next = NullIndex
 	storedOrder.Prev = NullIndex
 	storedOrder.Node = nil
@@ -229,6 +220,9 @@ func (ob *OrderBook) addBuyOrder(order Order) {
 		ob.BuyTree.Insert(searchNodePrice, orderTypeObj)
 	}
 	ob.orders[order.ID] = idx
+	
+	// 触发 Maker 事件
+	ob.listener.OnOrderAccepted(order.ID)
 }
 
 // addSellOrder 将卖单加入订单簿
@@ -261,6 +255,9 @@ func (ob *OrderBook) addSellOrder(order Order) {
 		ob.SellTree.Insert(searchNodePrice, orderTypeObj)
 	}
 	ob.orders[order.ID] = idx
+
+	// 触发 Maker 事件
+	ob.listener.OnOrderAccepted(order.ID)
 }
 
 func (ob *OrderBook) removeBuyNode(key float64) error {
@@ -276,14 +273,6 @@ func (ob *OrderBook) removeSellNode(key float64) error {
 }
 
 // removeOrder 从订单簿移除订单
-// 注意：现在参数应该是指针吗？
-// 如果传入 *Order，它是堆上的对象吗？还是 Arena 中的对象？
-// 通常 CancelOrder 会查找到 Arena Index，然后获取 *Order。
-// 为了保持兼容，我们假设传入的是 Arena 中的 Order 指针，或者我们修改参数为 Index。
-// 这里的 removeOrder 是内部方法，被 Process 调用。
-// 在 Process 中，我们可能拿到的是 Arena 中的指针。
-// 但是 removeOrder 需要从 Tree 中移除。
-// 建议：参数改为 order *Order (Arena 指针)
 func (ob *OrderBook) removeOrder(order *Order) error {
 	orderPrice := order.Price.Float64()
 	startPoint := float64(int(math.Ceil(orderPrice)) / ob.orderLimitRange * ob.orderLimitRange)
