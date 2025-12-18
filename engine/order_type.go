@@ -2,7 +2,7 @@ package engine
 
 import (
 	"errors"
- 
+
 	"github.com/goovo/binarytree"
 )
 
@@ -20,13 +20,14 @@ func NewOrderType(orderSide Side) *OrderType {
 }
 
 // AddOrderInQueue 将订单加入该方向的价格树队列
-func (ot *OrderType) AddOrderInQueue(order Order) (*OrderNode, error) {
+func (ot *OrderType) AddOrderInQueue(arena *OrderArena, orderIdx IndexType) (*OrderNode, error) {
+	order := arena.Get(orderIdx)
 	if ot.Type != order.Type {
 		return nil, errors.New("invalid order type")
 	}
 	orderNode := NewOrderNode()
-	orderNode.Orders = append(orderNode.Orders, &order)
-	orderNode.Volume = order.Amount
+	orderNode.addOrder(arena, orderIdx)
+	
 	orderPrice := order.Price.Float64()
 	ot.Tree.Insert(orderPrice, orderNode)
 	return orderNode, nil

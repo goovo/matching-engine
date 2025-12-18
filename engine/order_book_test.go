@@ -36,7 +36,7 @@ func TestAddOrderInBook(t *testing.T) {
 			ob.addSellOrder(*tt.input)
 		}
 
-		if ob.orders[tt.input.ID] == nil {
+		if _, ok := ob.orders[tt.input.ID]; !ok {
 			t.Fatal("Order should be pushed in orders array")
 		}
 
@@ -124,13 +124,13 @@ func TestRemoveOrderFromBook(t *testing.T) {
 		}
 	}
 
-	err := ob.removeOrder(tests[0].input)
-	if err != nil {
+	removed := ob.CancelOrder(tests[0].input.ID)
+	if removed == nil {
 		t.Fatal("Order is not removed")
 	}
 
-	err = ob.removeOrder(tests[0].input)
-	if err == nil {
+	removed2 := ob.CancelOrder(tests[0].input.ID)
+	if removed2 != nil {
 		t.Fatal("The response should be order not found")
 	}
 }

@@ -39,7 +39,7 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 	noMoreOrders := false
 	var allOrdersProcessed []*Order
 	var partialOrder *Order
-	orderOriginalAmount := order.Amount
+	orderOriginalAmount := order.Amount.Clone() // Clone
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
 		count++
 		if order.Type == Sell {
@@ -56,30 +56,16 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 				break
 			}
 		}
-		// fmt.Println("maxNode in", maxNode.Key, maxNode.Data.(*OrderType).Tree.Root.Key)
-
-		// var t []Trade
+		
 		var ordersProcessed []*Order
 		noMoreOrders, ordersProcessed, partialOrder = ob.processLimit(&order, partialOrder, maxNode.Data.(*OrderType).Tree, orderOriginalAmount) //, orderPrice)
-		// fmt.Printf("\npartialOrder in between: %#v\n", partialOrder)
-		// fmt.Printf("noMoreOrders: %#v\n\n", noMoreOrders)
+		
 		allOrdersProcessed = append(allOrdersProcessed, ordersProcessed...)
-		// trades = append(trades, t...)
 
 		if maxNode.Data.(*OrderType).Tree.Root == nil {
-			// node := remove(maxNode.Key)
-			// // node := ob.removeBuyNode(maxNode.Key)
-			// tree.Root = node
-			// fmt.Println("removing", maxNode.Key)
 			remove(maxNode.Key)
 		}
 	}
-
-	// return trades, allOrdersProcessed, partialOrder
-	// if partialOrder.Amount == nil {
-	// 	partialOrder = nil
-	// }
-	// fmt.Printf("partialOrder final: %#v\n", partialOrder)
 
 	return allOrdersProcessed, partialOrder
 }
@@ -94,52 +80,45 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 	}
 	noMoreOrders := false
 	var ordersProcessed []*Order
-	// var partialOrder *Order
-	// fmt.Printf("partialOrder start: %#v\n", partialOrder)
-
-	// var partialOrder *Order
+	
 	if maxNode == nil {
-		// return trades, noMoreOrders, nil, nil
 		return noMoreOrders, nil, nil
 	}
-	// countAdd := 0.0
+	
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
 		if order.Type == Sell {
 			maxNode = tree.Max()
 		} else {
 			maxNode = tree.Min()
 		}
-		// fmt.Println("maxNode more in", maxNode.Key, maxNode.Data.(*OrderNode).Orders)
+		
 		if maxNode == nil || noMoreOrders {
 			if order.Amount.Cmp(decimalZero) == 1 {
 				partialOrder = NewOrder(order.ID, order.Type, order.Amount, order.Price)
 				break
 			} else {
-				// partialOrder = nil
 				break
 			}
 		}
 		if order.Type == Sell {
 			if orderPrice > maxNode.Key {
-				// fmt.Println("adding sellnode directly")
 				noMoreOrders = true
-				// return trades, noMoreOrders, nil, nil
 				return noMoreOrders, ordersProcessed, partialOrder
 			}
 		} else {
 			if orderPrice < maxNode.Key {
-				// fmt.Println("adding buynode directly")
 				noMoreOrders = true
-				// return trades, noMoreOrders, nil, nil
 				return noMoreOrders, ordersProcessed, partialOrder
 			}
 		}
 
-		nodeData := maxNode.Data.(*OrderNode) //([]*Order)
-		nodeOrders := nodeData.Orders         //([]*Order)
-		countMatch := 0
-		// fmt.Println("length of nodeOrders", len(nodeOrders))
-		for _, ele := range nodeOrders {
+		nodeData := maxNode.Data.(*OrderNode)
+		currIdx := nodeData.Head
+
+		for currIdx != NullIndex {
+			ele := ob.Arena.Get(currIdx)
+			nextIdx := ele.Next // Save next
+			
 			if order.Type == Sell {
 				if ele.Price.Cmp(order.Price) == -1 {
 					noMoreOrders = true
@@ -152,73 +131,53 @@ func (ob *OrderBook) processLimit(order, partialOrder *Order, tree *binarytree.B
 				}
 			}
 
-			// countAdd += ele.Amount
-			// fmt.Println(ele.Price, order.Price, ele.Amount, order.Amount, ele.Amount.Cmp(order.Amount))
 			if ele.Amount.Cmp(order.Amount) == 1 {
-				nodeData.updateVolume(order.Amount.Neg())
-				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: order.Amount, Price: ele.Price})
+				// 使用原地修改
+				nodeData.Volume.SubMut(order.Amount)
 
-				amount := ele.Amount.Sub(order.Amount)
-				// amount = math.Floor(amount*100000000) / 100000000
-				ele.Amount = amount
+				ele.Amount.SubMut(order.Amount)
 
 				partialOrder = NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price)
 				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, order.Price))
 
-				maxNode.SetData(nodeData)
-
-				order.Amount, _ = util.NewDecimalFromString("0.0")
+				order.Amount.SetZero() // 优化：原地置零
+				
 				noMoreOrders = true
 				break
 			} else if ele.Amount.Cmp(order.Amount) == 0 {
-				nodeData.updateVolume(order.Amount.Neg())
-
+				// 必须先创建副本，因为 removeOrder 后 ele 指针可能失效或指向被复用的内存
 				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
 				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, order.Price))
 				partialOrder = nil
-				countMatch++
-				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: order.Amount, Price: ele.Price})
 
-				order.Amount, _ = util.NewDecimalFromString("0.0")
-				// orderComplete = true
-
-				// ele.Amount = 0
-				// ob.mutex.Lock()
+				// 先删除 map 索引
 				delete(ob.orders, ele.ID)
-				// ob.mutex.Unlock()
-
+				
+				// 再从链表移除 (会调用 Arena.Free)
+				nodeData.removeOrder(ob.Arena, currIdx)
+				
+				order.Amount.SetZero()
+				
+				currIdx = nextIdx // Move to next
 				break
 			} else {
-				countMatch++
-
-				amount := order.Amount.Sub(ele.Amount)
-
-				partialOrder = NewOrder(order.ID, order.Type, amount, order.Price)
-
 				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
 
-				nodeData.updateVolume(ele.Amount.Neg())
+				order.Amount.SubMut(ele.Amount)
+				
+				partialOrder = NewOrder(order.ID, order.Type, order.Amount, order.Price)
 
-				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: ele.Amount, Price: ele.Price})
-
-				order.Amount = order.Amount.Sub(ele.Amount)
-				// ob.mutex.Lock()
 				delete(ob.orders, ele.ID)
-				// ob.mutex.Unlock()
+				nodeData.removeOrder(ob.Arena, currIdx)
 			}
+			currIdx = nextIdx
 		}
 
-		if len(nodeOrders) == countMatch {
-			node := tree.Root.Remove(maxNode.Key) // ob.removeBuyNode(maxNode.Key, buyTree)
-			// fmt.Printf("node removed: %#v %#v\n", node, maxNode)
+		if nodeData.Count == 0 {
+			node := tree.Root.Remove(maxNode.Key) 
 			tree.Root = node
+			nodeData.Release() // 回收空的 OrderNode
 		}
-
-		nodeData.Orders = nodeOrders[countMatch:]
-		maxNode.SetData(nodeData)
 	}
-	// return trades, noMoreOrders, ordersProcessed, partialOrder
-	// fmt.Printf("partialOrder: %#v\n", partialOrder)
-	// fmt.Printf("order.Amount: %#v\n", order.Amount.String())
 	return noMoreOrders, ordersProcessed, partialOrder
 }

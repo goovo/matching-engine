@@ -27,14 +27,25 @@ func TestCancelOrder(t *testing.T) {
 		}
 	}
 
-	on := ob.orders[tests[4].input.ID]
+	idx := ob.orders[tests[4].input.ID]
+	orderInArena := ob.Arena.Get(idx)
+	on := orderInArena.Node
 
 	order := ob.CancelOrder("s1")
 
-	for _, o := range on.Orders {
-		if o.ID == tests[4].input.ID {
-			t.Fatal("Order is not removed from the OrderNode")
+	currIdx := on.Head
+	found := false
+	for currIdx != NullIndex {
+		currOrder := ob.Arena.Get(currIdx)
+		if currOrder.ID == tests[4].input.ID {
+			found = true
+			break
 		}
+		currIdx = currOrder.Next
+	}
+
+	if found {
+		t.Fatal("Order is not removed from the OrderNode")
 	}
 
 	if order == nil {
@@ -46,7 +57,7 @@ func TestCancelOrder(t *testing.T) {
 		t.Fatal("Order is not removed from Tree of Orderbook")
 	}
 
-	if ob.orders[order.ID] != nil {
+	if _, ok := ob.orders[order.ID]; ok {
 		t.Fatal("Order is not removed from \"orders\" of Orderbook")
 	}
 }

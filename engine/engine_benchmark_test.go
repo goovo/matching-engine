@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"testing"
 )
@@ -75,5 +76,45 @@ func BenchmarkMarketMatchSimple(b *testing.B) {
 		amt := DecimalBig("1.0")                                 // 市价买单数量
 		zero := DecimalBig("0.0")                                 // 市价单价格字段置零
 		_, _ = ob.ProcessMarket(*NewOrder(bid, Buy, amt, zero))   // 进行撮合
+	}
+}
+
+// BenchmarkCancelOrder
+// 中文说明：
+// - 该基准测试用于评估撤单性能（验证 O(1) 优化效果）
+// - 场景：在同一价格档位堆积大量订单，然后随机撤单
+func BenchmarkCancelOrder(b *testing.B) {
+	// 重定向标准输出
+	devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	origStdout := os.Stdout
+	os.Stdout = devnull
+	defer func() {
+		os.Stdout = origStdout
+		_ = devnull.Close()
+	}()
+
+	ob := NewOrderBook()
+	ids := make([]string, 0, b.N)
+	
+	// 预置 b.N 个订单在同一价格档位
+	// 这会创建一个很长的链表（如果未重构则是切片）
+	for i := 0; i < b.N; i++ {
+		id := fmt.Sprintf("order-%d", i)
+		ids = append(ids, id)
+		amt := DecimalBig("1.0")
+		prc := DecimalBig("100.0")
+		_, _ = ob.Process(*NewOrder(id, Buy, amt, prc))
+	}
+
+	// 打乱 ID 顺序以模拟随机撤单
+	rand.Shuffle(len(ids), func(i, j int) {
+		ids[i], ids[j] = ids[j], ids[i]
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for _, id := range ids {
+		ob.CancelOrder(id)
 	}
 }

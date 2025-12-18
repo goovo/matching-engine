@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
- 
+
 	"github.com/goovo/matching-engine/util"
 )
 
@@ -16,19 +16,27 @@ type Order struct {
 	Price  *util.StandardBigDecimal `json:"price"`  // validate:"gt=0"`
 	ID     string                   `json:"id"`     // validate:"required"`
 	Type   Side                     `json:"type"`   //  validate:"side_validate"`
+
+	// 链表索引 (Arena Index)
+	Next IndexType `json:"-"`
+	Prev IndexType `json:"-"`
+	
+	// 反向指针，指向所属的 OrderNode
+	// 注意：这里依然使用指针，因为 OrderNode 目前不在 Arena 中
+	// 如果需要极致性能，OrderNode 也应该进入 Arena，但目前主要瓶颈是 Order 链表遍历
+	Node *OrderNode `json:"-"`
 }
 
-// func sideValidation(fl validator.FieldLevel) bool {
-// 	if fl.Field().Interface() != Buy && fl.Field().Interface() != Sell {
-// 		return false
-// 	}
-// 	return true
-// }
-
-// NewOrder 返回 *Order
+// NewOrder 返回 *Order (堆分配，用于 API 边界)
 func NewOrder(id string, orderType Side, amount, price *util.StandardBigDecimal) *Order {
-	o := &Order{ID: id, Type: orderType, Amount: amount, Price: price}
-	return o
+	return &Order{
+		ID:     id,
+		Type:   orderType,
+		Amount: amount,
+		Price:  price,
+		Next:   NullIndex,
+		Prev:   NullIndex,
+	}
 }
 
 // FromJSON 从 JSON 字符串创建 Order 结构体
@@ -37,6 +45,9 @@ func (order *Order) FromJSON(msg []byte) error {
 	if err != nil {
 		return err
 	}
+	// 初始化索引
+	order.Next = NullIndex
+	order.Prev = NullIndex
 	return nil
 }
 
@@ -88,6 +99,8 @@ func (order *Order) UnmarshalJSON(data []byte) error {
 
 	order.Type = obj.Type
 	order.ID = obj.ID
+	order.Next = NullIndex
+	order.Prev = NullIndex
 
 	price := order.Price.Float64()
 	if price <= 0 {

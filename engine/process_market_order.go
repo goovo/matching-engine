@@ -33,7 +33,7 @@ func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTre
 	noMoreOrders := false
 	var allOrdersProcessed []*Order
 	var partialOrder *Order
-	orderOriginalAmount := order.Amount
+	orderOriginalAmount := order.Amount.Clone()
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
 		count++
 		if order.Type == Sell {
@@ -90,109 +90,57 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 		}
 		if maxNode == nil || noMoreOrders {
 			break
-			// if order.Amount.Cmp(decimalZero) == 1 {
-			// 	// fmt.Println("inserting", noMoreOrders)
-			// 	// ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, decimalZero))
-			// 	// partialOrder = NewOrder(order.ID, order.Type, order.Amount, order.Price)
-			// 	break
-			// } else {
-			// 	break
-			// }
 		}
-		// if order.Type == Sell {
-		// 	if orderPrice > maxNode.Key {
-		// 		// fmt.Println("adding sellnode directly")
-		// 		noMoreOrders = true
-		// 		// return trades, noMoreOrders, nil, nil
-		// 		return noMoreOrders, nil, nil
-		// 	}
-		// } else {
-		// 	if orderPrice < maxNode.Key {
-		// 		// fmt.Println("adding buynode directly")
-		// 		noMoreOrders = true
-		// 		// return trades, noMoreOrders, nil, nil
-		// 		return noMoreOrders, nil, nil
-		// 	}
-		// }
-
+		
 		nodeData := maxNode.Data.(*OrderNode) //([]*Order)
-		nodeOrders := nodeData.Orders         //([]*Order)
-		countMatch := 0
-		for _, ele := range nodeOrders {
-			// if order.Type == Sell {
-			// 	if ele.Price.Cmp(order.Price) == -1 {
-			// 		noMoreOrders = true
-			// 		break
-			// 	}
-			// } else {
-			// 	if ele.Price.Cmp(order.Price) == 1 {
-			// 		noMoreOrders = true
-			// 		break
-			// 	}
-			// }
-
-			// countAdd += ele.Amount
-			// fmt.Println(ele.Price, ele.Amount, order.Amount, ele.Amount.Cmp(order.Amount))
+		currIdx := nodeData.Head
+		
+		for currIdx != NullIndex {
+			ele := ob.Arena.Get(currIdx)
+			nextIdx := ele.Next // Save next
+			
 			if ele.Amount.Cmp(order.Amount) == 1 {
-				nodeData.updateVolume(order.Amount.Neg())
-				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: order.Amount, Price: ele.Price})
+				// 使用原地修改
+				nodeData.Volume.SubMut(order.Amount)
 
-				amount := ele.Amount.Sub(order.Amount)
-				// amount = math.Floor(amount*100000000) / 100000000
-				ele.Amount = amount
+				ele.Amount.SubMut(order.Amount)
 
 				partialOrder = NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price)
 				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, decimalZero))
 
-				maxNode.SetData(nodeData)
-
-				order.Amount, _ = util.NewDecimalFromString("0.0")
+				order.Amount.SetZero()
 				noMoreOrders = true
 				break
 			}
 			if ele.Amount.Cmp(order.Amount) == 0 {
-				nodeData.updateVolume(order.Amount.Neg())
-
 				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
 				ordersProcessed = append(ordersProcessed, NewOrder(order.ID, order.Type, orderOriginalAmount, decimalZero))
 
-				countMatch++
-				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: order.Amount, Price: ele.Price})
-
-				order.Amount, _ = util.NewDecimalFromString("0.0")
-				// orderComplete = true
-
-				// ele.Amount = 0
-				// ob.mutex.Lock()
+				order.Amount.SetZero()
+				
 				delete(ob.orders, ele.ID)
-				// ob.mutex.Unlock()
+				
+				nodeData.removeOrder(ob.Arena, currIdx)
 
+				currIdx = nextIdx
 				break
 			} else {
-				countMatch++
-
 				ordersProcessed = append(ordersProcessed, NewOrder(ele.ID, ele.Type, ele.Amount, ele.Price))
 
-				nodeData.updateVolume(ele.Amount.Neg())
-
-				// trades = append(trades, Trade{BuyOrderID: ele.ID, SellOrderID: order.ID, Amount: ele.Amount, Price: ele.Price})
-
-				order.Amount = order.Amount.Sub(ele.Amount)
-				// ob.mutex.Lock()
+				order.Amount.SubMut(ele.Amount)
+				
 				delete(ob.orders, ele.ID)
-				// ob.mutex.Unlock()
+				
+				nodeData.removeOrder(ob.Arena, currIdx)
 			}
+			currIdx = nextIdx
 		}
 
-		if len(nodeOrders) == countMatch {
-			node := tree.Root.Remove(maxNode.Key) // ob.removeBuyNode(maxNode.Key, buyTree)
-			// fmt.Printf("node removed: %#v %#v\n", node, maxNode)
+		if nodeData.Count == 0 {
+			node := tree.Root.Remove(maxNode.Key) 
 			tree.Root = node
+			nodeData.Release()
 		}
-
-		nodeData.Orders = nodeOrders[countMatch:]
-		maxNode.SetData(nodeData)
 	}
-	// return trades, noMoreOrders, ordersProcessed, partialOrder
 	return noMoreOrders, ordersProcessed, partialOrder
 }

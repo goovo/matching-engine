@@ -18,14 +18,21 @@ func TestAddOrderInNode(t *testing.T) {
 		{NewOrder("b4", Buy, DecimalBig("1.0"), DecimalBig("7000.0"))},
 	}
 	on := NewOrderNode()
+	arena := NewOrderArena(100)
 	volume := DecimalBig("0.0")
 	for _, tt := range tests {
-		on.addOrder(*tt.input)
+		idx := arena.Alloc()
+		storedOrder := arena.Get(idx)
+		*storedOrder = *tt.input
+		storedOrder.Next = NullIndex
+		storedOrder.Prev = NullIndex
+
+		on.addOrder(arena, idx)
 		volume = volume.Add(tt.input.Amount)
 	}
 
-	if len(on.Orders) != len(tests) {
-		t.Fatalf("Invalid order length (have: %d, want: %d", len(on.Orders), len(tests))
+	if on.Count != len(tests) {
+		t.Fatalf("Invalid order length (have: %d, want: %d", on.Count, len(tests))
 	}
 
 	if on.Volume.Cmp(volume) != 0 {
@@ -43,17 +50,29 @@ func TestRemoveOrderFromNode(t *testing.T) {
 		{NewOrder("b4", Buy, DecimalBig("1.0"), DecimalBig("7000.0"))},
 	}
 	on := NewOrderNode()
+	arena := NewOrderArena(100)
 	volume := DecimalBig("0.0")
-	for _, tt := range tests {
-		on.addOrder(*tt.input)
+	var firstIdx IndexType
+	for i, tt := range tests {
+		idx := arena.Alloc()
+		storedOrder := arena.Get(idx)
+		*storedOrder = *tt.input
+		storedOrder.Next = NullIndex
+		storedOrder.Prev = NullIndex
+
+		if i == 0 {
+			firstIdx = idx
+		}
+
+		on.addOrder(arena, idx)
 		volume = volume.Add(tt.input.Amount)
 	}
 
-	on.removeOrder(0)
+	on.removeOrder(arena, firstIdx)
 	volume = volume.Sub(tests[0].input.Amount)
 
-	if len(on.Orders) != len(tests)-1 {
-		t.Fatalf("Invalid order length (have: %d, want: %d", len(on.Orders), len(tests))
+	if on.Count != len(tests)-1 {
+		t.Fatalf("Invalid order length (have: %d, want: %d", on.Count, len(tests)-1)
 	}
 
 	if on.Volume.Cmp(volume) != 0 {

@@ -20,8 +20,15 @@ func TestAddOrderInQueue(t *testing.T) {
 		{NewOrder("s4", Sell, DecimalBig("2.0"), DecimalBig("10000.0")), false},
 	}
 	ot := NewOrderType("sell")
+	arena := NewOrderArena(100)
 	for _, tt := range tests {
-		on, err := ot.AddOrderInQueue(*tt.input)
+		idx := arena.Alloc()
+		storedOrder := arena.Get(idx)
+		*storedOrder = *tt.input
+		storedOrder.Next = NullIndex
+		storedOrder.Prev = NullIndex
+
+		on, err := ot.AddOrderInQueue(arena, idx)
 		if tt.err {
 			if err == nil {
 				t.Fatalf("Cannot append %s order under %s order type", tt.input.Type, ot.Type)
@@ -29,11 +36,11 @@ func TestAddOrderInQueue(t *testing.T) {
 			continue
 		}
 		fmt.Println("on", on, err)
-		if on.Volume != tt.input.Amount {
+		if on.Volume.Cmp(tt.input.Amount) != 0 {
 			t.Fatalf("Volume update failure (have: %s, want: %s)", on.Volume.String(), tt.input.Amount.String())
 		}
-		if len(on.Orders) != 1 {
-			t.Fatalf("Order length update failure (have: %d, want: 1)", len(on.Orders))
+		if on.Count != 1 {
+			t.Fatalf("Order length update failure (have: %d, want: 1)", on.Count)
 		}
 	}
 
