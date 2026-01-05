@@ -51,7 +51,7 @@ func main() {
 func runBenchmark(name string, workers int, isMarket bool) {
 	fmt.Printf("\nRunning: %s ...\n", name)
 
-	ob := engine.NewOrderBook()
+	ob := engine.NewOrderBook(nil)
 	
 	// 如果是市价单测试，先预填充一些流动性
 	if isMarket {

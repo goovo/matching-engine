@@ -1,10 +1,29 @@
 syntax = "proto3";
 
+option go_package = "./engineGrpc";
+
+// Engine 服务定义
 service Engine {
     rpc Process(Order) returns (OutputOrders); 
     rpc ProcessMarket(Order) returns (OutputOrders); 
     rpc Cancel(Order) returns (Order);
     rpc FetchBook(BookInput) returns (BookOutput);
+    rpc GetOrderBookCount(Empty) returns (CountOutput);
+    rpc DelistPair(DelistInput) returns (DelistOutput);
+}
+
+message Empty {}
+
+message CountOutput {
+    int64 count = 1;
+}
+
+message DelistInput {
+    string pair = 1;
+}
+
+message DelistOutput {
+    repeated Order orders = 1;
 }
 
 message Order {

@@ -167,6 +167,22 @@ func (ob *OrderBook) String() string {
 	return result
 }
 
+// CancelAllOrders 取消订单簿中的所有订单，并返回这些订单
+func (ob *OrderBook) CancelAllOrders() []*Order {
+	ob.mutex.Lock()
+	defer ob.mutex.Unlock()
+
+	var orders []*Order
+	for _, idx := range ob.orders {
+		o := ob.Arena.Get(idx)
+		orders = append(orders, NewOrder(o.ID, o.Type, o.Amount.Clone(), o.Price.Clone()))
+	}
+
+	// 清空索引，虽然 OrderBook 即将废弃，但为了安全起见
+	ob.orders = make(map[string]IndexType)
+	return orders
+}
+
 // NewOrderBook 返回新的订单簿
 // listener: 事件回调接口，如果为 nil 则使用 NoOpListener
 func NewOrderBook(listener MatchingListener) *OrderBook {

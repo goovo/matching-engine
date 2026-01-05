@@ -5,23 +5,55 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goovo/matching-engine/engine"
 	engineGrpc "github.com/goovo/matching-engine/engineGrpc"
+	"github.com/goovo/matching-engine/pkg/mq"
 	"github.com/goovo/matching-engine/util"
 )
 
 // Engine 引擎服务实现，维护每个交易对的订单簿
 type Engine struct {
-	book map[string]*engine.OrderBook
-	mu   sync.RWMutex
+	book      map[string]*engine.OrderBook
+	mu        sync.RWMutex
+	producer  *mq.Producer
+	pairCount int64 // 活跃交易对数量 (atomic)
 }
 
 // NewEngine 返回 Engine 实例
 func NewEngine() *Engine {
-	return &Engine{book: map[string]*engine.OrderBook{}}
+	// 简单的 .env 解析逻辑 (兼容 YAML 风格)
+	kafkaHost := "localhost"
+	kafkaPort := "9092"
+	kafkaTopic := "market_events"
+
+	if content, err := os.ReadFile(".env"); err == nil {
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "host:") {
+				kafkaHost = strings.TrimSpace(strings.TrimPrefix(line, "host:"))
+			} else if strings.HasPrefix(line, "port:") {
+				kafkaPort = strings.TrimSpace(strings.TrimPrefix(line, "port:"))
+			} else if strings.HasPrefix(line, "topic:") {
+				kafkaTopic = strings.TrimSpace(strings.TrimPrefix(line, "topic:"))
+			}
+		}
+	}
+
+	brokers := []string{fmt.Sprintf("%s:%s", kafkaHost, kafkaPort)}
+	producer := mq.NewProducer(brokers, kafkaTopic)
+	fmt.Printf("Kafka Producer initialized: %v, topic: %s\n", brokers, kafkaTopic)
+
+	return &Engine{
+		book:     map[string]*engine.OrderBook{},
+		producer: producer,
+	}
 }
 
 // Process 实现 EngineServer 接口：处理限价单
@@ -50,14 +82,25 @@ func (e *Engine) Process(ctx context.Context, req *engineGrpc.Order) (*engineGrp
 	}
 
 	var pairBook *engine.OrderBook
-	e.mu.Lock()
+	e.mu.RLock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
+		e.mu.RUnlock()
 	} else {
-		pairBook = engine.NewOrderBook(nil)
-		e.book[req.GetPair()] = pairBook
+		e.mu.RUnlock()
+		e.mu.Lock()
+		// Double check
+		if val, ok := e.book[req.GetPair()]; ok {
+			pairBook = val
+		} else {
+			// 注入 Kafka 监听器
+			listener := NewKafkaMatchingListener(req.GetPair(), e.producer)
+			pairBook = engine.NewOrderBook(listener)
+			e.book[req.GetPair()] = pairBook
+			atomic.AddInt64(&e.pairCount, 1)
+		}
+		e.mu.Unlock()
 	}
-	e.mu.Unlock()
 
 	ordersProcessed, partialOrder := pairBook.Process(order)
 	// 中文注释：统计限价撮合的成交笔数与耗时
@@ -103,14 +146,25 @@ func (e *Engine) Cancel(ctx context.Context, req *engineGrpc.Order) (*engineGrpc
 	}
 
 	var pairBook *engine.OrderBook
-	e.mu.Lock()
+	e.mu.RLock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
+		e.mu.RUnlock()
 	} else {
-		pairBook = engine.NewOrderBook(nil)
-		e.book[req.GetPair()] = pairBook
+		e.mu.RUnlock()
+		e.mu.Lock()
+		// Double check
+		if val, ok := e.book[req.GetPair()]; ok {
+			pairBook = val
+		} else {
+			// 注入 Kafka 监听器
+			listener := NewKafkaMatchingListener(req.GetPair(), e.producer)
+			pairBook = engine.NewOrderBook(listener)
+			e.book[req.GetPair()] = pairBook
+			atomic.AddInt64(&e.pairCount, 1)
+		}
+		e.mu.Unlock()
 	}
-	e.mu.Unlock()
 
 	order = pairBook.CancelOrder(order.ID)
 
@@ -160,14 +214,25 @@ func (e *Engine) ProcessMarket(ctx context.Context, req *engineGrpc.Order) (*eng
 	}
 
 	var pairBook *engine.OrderBook
-	e.mu.Lock()
+	e.mu.RLock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
+		e.mu.RUnlock()
 	} else {
-		pairBook = engine.NewOrderBook(nil)
-		e.book[req.GetPair()] = pairBook
+		e.mu.RUnlock()
+		e.mu.Lock()
+		// Double check
+		if val, ok := e.book[req.GetPair()]; ok {
+			pairBook = val
+		} else {
+			// 注入 Kafka 监听器
+			listener := NewKafkaMatchingListener(req.GetPair(), e.producer)
+			pairBook = engine.NewOrderBook(listener)
+			e.book[req.GetPair()] = pairBook
+			atomic.AddInt64(&e.pairCount, 1)
+		}
+		e.mu.Unlock()
 	}
-	e.mu.Unlock()
 
 	ordersProcessed, partialOrder := pairBook.ProcessMarket(order)
 	// 中文注释：统计市价撮合的成交笔数与耗时
@@ -201,14 +266,14 @@ func (e *Engine) FetchBook(ctx context.Context, req *engineGrpc.BookInput) (*eng
 	}
 
 	var pairBook *engine.OrderBook
-	e.mu.Lock()
+	e.mu.RLock()
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
+		e.mu.RUnlock()
 	} else {
-		e.mu.Unlock()
+		e.mu.RUnlock()
 		return nil, errors.New("Invalid pair")
 	}
-	e.mu.Unlock()
 
 	// fmt.Println(pairBook)
 	book := pairBook.GetOrders(req.GetLimit())
@@ -253,4 +318,48 @@ func (e *Engine) FetchBook(ctx context.Context, req *engineGrpc.BookInput) (*eng
 	// 中文注释：统计查询订单簿的耗时
 	IncFetchBook(start)
 	return result, nil
+}
+
+// GetOrderBookCount 实现 EngineServer 接口：获取交易对数量
+func (e *Engine) GetOrderBookCount(ctx context.Context, req *engineGrpc.Empty) (*engineGrpc.CountOutput, error) {
+	count := atomic.LoadInt64(&e.pairCount)
+	return &engineGrpc.CountOutput{Count: count}, nil
+}
+
+// DelistPair 实现 EngineServer 接口：下架交易对
+func (e *Engine) DelistPair(ctx context.Context, req *engineGrpc.DelistInput) (*engineGrpc.DelistOutput, error) {
+	pair := req.GetPair()
+	e.mu.Lock()
+	ob, ok := e.book[pair]
+	if !ok {
+		e.mu.Unlock()
+		return nil, errors.New("Pair not found")
+	}
+	delete(e.book, pair)
+	atomic.AddInt64(&e.pairCount, -1)
+	e.mu.Unlock()
+
+	// 锁外执行：获取并取消所有订单
+	orders := ob.CancelAllOrders()
+
+	// 转换格式
+	var grpcOrders []*engineGrpc.Order
+	for _, o := range orders {
+		var side engineGrpc.Side
+		if o.Type == engine.Buy {
+			side = engineGrpc.Side_buy
+		} else {
+			side = engineGrpc.Side_sell
+		}
+
+		grpcOrders = append(grpcOrders, &engineGrpc.Order{
+			ID:     o.ID,
+			Type:   side,
+			Amount: o.Amount.String(),
+			Price:  o.Price.String(),
+			Pair:   pair,
+		})
+	}
+
+	return &engineGrpc.DelistOutput{Orders: grpcOrders}, nil
 }
