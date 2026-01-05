@@ -1,44 +1,43 @@
 package engine
 
 import (
-	"github.com/goovo/binarytree"
+"github.com/goovo/binarytree"
 )
 
 // ProcessMarket 执行市价单撮合流程
-func (ob *OrderBook) ProcessMarket(order Order) {
+func (ob *OrderBook) ProcessMarket(order Order) ([]Order, *Order) {
 	ob.mutex.Lock()
 	defer ob.mutex.Unlock()
+	
+	var processed []Order
+	var partial *Order
 
 	if order.Type == Buy {
-		ob.commonProcessMarket(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
+		processed, partial = ob.commonProcessMarket(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
 	} else {
-		ob.commonProcessMarket(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
+		processed, partial = ob.commonProcessMarket(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
 	}
+	return processed, partial
 }
 
-func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) {
+func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) ([]Order, *Order) {
 	var maxNode *binarytree.BinaryNode
+	var processed []Order
+	
 	if order.Type == Sell {
 		maxNode = tree.Max()
 	} else {
 		maxNode = tree.Min()
 	}
 	if maxNode == nil {
-		// 市价单如果不匹配，直接丢弃或取消（IOC/FOK）
-		// 这里假设是 IOC (Immediate or Cancel)，未成交部分取消
 		if order.ID != "" {
-			// 触发取消事件（剩余全部取消）
 			ob.listener.OnOrderCancelled(order.ID)
 		}
-		return
+		return processed, nil
 	}
-	count := 0
 	noMoreOrders := false
 	
-	// orderOriginalAmount := order.Amount.Clone()
-
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
-		count++
 		if order.Type == Sell {
 			maxNode = tree.Max()
 		} else {
@@ -46,22 +45,27 @@ func (ob *OrderBook) commonProcessMarket(order Order, tree *binarytree.BinaryTre
 		}
 		if maxNode == nil || noMoreOrders {
 			if order.Amount.Cmp(decimalZero) == 1 {
-				// 市价单未完全成交，剩余部分取消
 				ob.listener.OnOrderCancelled(order.ID)
+				return processed, &order 
 			}
 			break
 		}
 
-		noMoreOrders = ob.processLimitMarket(&order, maxNode.Data.(*OrderType).Tree)
+		var subProcessed []Order
+		noMoreOrders, subProcessed = ob.processLimitMarket(&order, maxNode.Data.(*OrderType).Tree)
+		processed = append(processed, subProcessed...)
 
 		if maxNode.Data.(*OrderType).Tree.Root == nil {
 			remove(maxNode.Key)
 		}
 	}
+	return processed, nil
 }
 
-func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTree) bool {
+func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTree) (bool, []Order) {
 	var maxNode *binarytree.BinaryNode
+	var processed []Order
+	
 	if order.Type == Sell {
 		maxNode = tree.Max()
 	} else {
@@ -70,7 +74,7 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 	noMoreOrders := false
 	
 	if maxNode == nil {
-		return noMoreOrders
+		return noMoreOrders, processed
 	}
 	
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
@@ -88,7 +92,7 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 		
 		for currIdx != NullIndex {
 			ele := ob.Arena.Get(currIdx)
-			nextIdx := ele.Next // Save next
+			nextIdx := ele.Next 
 			
 			if ele.Amount.Cmp(order.Amount) == 1 {
 				// Case 1: Maker > Taker
@@ -106,11 +110,8 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
 				order.Amount.SetZero()
-				
 				delete(ob.orders, ele.ID)
-				
 				nodeData.removeOrder(ob.Arena, currIdx)
-
 				currIdx = nextIdx
 				break
 			} else {
@@ -118,9 +119,7 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
 				order.Amount.SubMut(ele.Amount)
-				
 				delete(ob.orders, ele.ID)
-				
 				nodeData.removeOrder(ob.Arena, currIdx)
 			}
 			currIdx = nextIdx
@@ -132,5 +131,5 @@ func (ob *OrderBook) processLimitMarket(order *Order, tree *binarytree.BinaryTre
 			nodeData.Release()
 		}
 	}
-	return noMoreOrders
+	return noMoreOrders, processed
 }

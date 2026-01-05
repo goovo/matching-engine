@@ -1,30 +1,32 @@
 package engine
 
 import (
-	// "fmt"
-
-	"github.com/goovo/binarytree"
-	"github.com/goovo/matching-engine/util"
+"github.com/goovo/binarytree"
+"github.com/goovo/matching-engine/util"
 )
 
 var decimalZero, _ = util.NewDecimalFromString("0.0")
 
 // Process 执行限价单撮合流程
-func (ob *OrderBook) Process(order Order) {
+func (ob *OrderBook) Process(order Order) ([]Order, *Order) {
 	ob.mutex.Lock()
 	defer ob.mutex.Unlock()
 
+	var processed []Order
+	var partial *Order
+
 	if order.Type == Buy {
-		// return ob.processOrderB(order)
-		ob.commonProcess(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
+		processed, partial = ob.commonProcess(order, ob.SellTree, ob.addBuyOrder, ob.removeSellNode)
 	} else {
-		// return ob.processOrderS(order)
-		ob.commonProcess(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
+		processed, partial = ob.commonProcess(order, ob.BuyTree, ob.addSellOrder, ob.removeBuyNode)
 	}
+	return processed, partial
 }
 
-func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) {
+func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add func(Order), remove func(float64) error) ([]Order, *Order) {
 	var maxNode *binarytree.BinaryNode
+	var processed []Order
+	
 	if order.Type == Sell {
 		maxNode = tree.Max()
 	} else {
@@ -32,17 +34,12 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 	}
 	if maxNode == nil {
 		add(order)
-		return
+		return processed, nil
 	}
 
-	count := 0
 	noMoreOrders := false
 	
-	// 不需要 Clone 了，因为不需要返回 partialOrder
-	// orderOriginalAmount := order.Amount.Clone() 
-	
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
-		count++
 		if order.Type == Sell {
 			maxNode = tree.Max()
 		} else {
@@ -51,23 +48,28 @@ func (ob *OrderBook) commonProcess(order Order, tree *binarytree.BinaryTree, add
 		if maxNode == nil || noMoreOrders {
 			if order.Amount.Cmp(decimalZero) == 1 {
 				add(order)
-				break
+				return processed, &order 
 			} else {
 				break
 			}
 		}
 		
-		noMoreOrders = ob.processLimit(&order, maxNode.Data.(*OrderType).Tree)
+		var subProcessed []Order
+		noMoreOrders, subProcessed = ob.processLimit(&order, maxNode.Data.(*OrderType).Tree)
+		processed = append(processed, subProcessed...)
 		
 		if maxNode.Data.(*OrderType).Tree.Root == nil {
 			remove(maxNode.Key)
 		}
 	}
+	return processed, nil
 }
 
-func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) bool {
+func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) (bool, []Order) {
 	orderPrice := order.Price.Float64()
 	var maxNode *binarytree.BinaryNode
+	var processed []Order
+	
 	if order.Type == Sell {
 		maxNode = tree.Max()
 	} else {
@@ -76,7 +78,7 @@ func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) boo
 	noMoreOrders := false
 	
 	if maxNode == nil {
-		return noMoreOrders
+		return noMoreOrders, processed
 	}
 	
 	for maxNode == nil || order.Amount.Cmp(decimalZero) == 1 {
@@ -87,18 +89,17 @@ func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) boo
 		}
 		
 		if maxNode == nil || noMoreOrders {
-			// 这里不需要处理 break，外层循环会处理
 			break
 		}
 		if order.Type == Sell {
 			if orderPrice > maxNode.Key {
 				noMoreOrders = true
-				return noMoreOrders
+				return noMoreOrders, processed
 			}
 		} else {
 			if orderPrice < maxNode.Key {
 				noMoreOrders = true
-				return noMoreOrders
+				return noMoreOrders, processed
 			}
 		}
 
@@ -107,7 +108,7 @@ func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) boo
 
 		for currIdx != NullIndex {
 			ele := ob.Arena.Get(currIdx)
-			nextIdx := ele.Next // Save next
+			nextIdx := ele.Next 
 			
 			if order.Type == Sell {
 				if ele.Price.Cmp(order.Price) == -1 {
@@ -122,43 +123,30 @@ func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) boo
 			}
 
 			if ele.Amount.Cmp(order.Amount) == 1 {
-				// Case 1: Maker 量 > Taker 量 (部分成交)
-				// 使用原地修改
+				// Case 1: Maker > Taker (Partial)
 				nodeData.Volume.SubMut(order.Amount)
 				ele.Amount.SubMut(order.Amount)
 
-				// 触发成交事件
-				// Maker: ele, Taker: order
 				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, order.Amount.Val)
-
-				order.Amount.SetZero() // 优化：原地置零
 				
+				order.Amount.SetZero()
 				noMoreOrders = true
 				break
 			} else if ele.Amount.Cmp(order.Amount) == 0 {
-				// Case 2: Maker 量 == Taker 量 (完全成交)
-				
-				// 触发成交事件
+				// Case 2: Full
 				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
-				// 先删除 map 索引
 				delete(ob.orders, ele.ID)
-				
-				// 再从链表移除 (会调用 Arena.Free)
 				nodeData.removeOrder(ob.Arena, currIdx)
 				
 				order.Amount.SetZero()
-				
-				currIdx = nextIdx // Move to next
+				currIdx = nextIdx 
 				break
 			} else {
-				// Case 3: Maker 量 < Taker 量 (Maker 吃光，Taker 还有剩)
-				
-				// 触发成交事件
+				// Case 3: Maker < Taker
 				ob.listener.OnTrade(ele.ID, order.ID, ele.Type, ele.Price.Val, ele.Amount.Val)
 
 				order.Amount.SubMut(ele.Amount)
-				
 				delete(ob.orders, ele.ID)
 				nodeData.removeOrder(ob.Arena, currIdx)
 			}
@@ -168,8 +156,8 @@ func (ob *OrderBook) processLimit(order *Order, tree *binarytree.BinaryTree) boo
 		if nodeData.Count == 0 {
 			node := tree.Root.Remove(maxNode.Key) 
 			tree.Root = node
-			nodeData.Release() // 回收空的 OrderNode
+			nodeData.Release() 
 		}
 	}
-	return noMoreOrders
+	return noMoreOrders, processed
 }

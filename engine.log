@@ -1,0 +1,4 @@
+RDMA Consumer Started. Polling shared memory...
+grpc server listening to :9000
+RDMA Received: OID=31 Side=buy Price=0.3 Amt=100
+[metrics] Process QPS=1 Avg=0.128ms Matches/s=0 | Market QPS=0 Avg=0.000ms Matches/s=0 | Cancel QPS=0 Avg=0.000ms | FetchBook QPS=0 Avg=0.000ms

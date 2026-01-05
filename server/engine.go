@@ -54,7 +54,7 @@ func (e *Engine) Process(ctx context.Context, req *engineGrpc.Order) (*engineGrp
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
 	} else {
-		pairBook = engine.NewOrderBook()
+		pairBook = engine.NewOrderBook(nil)
 		e.book[req.GetPair()] = pairBook
 	}
 	e.mu.Unlock()
@@ -107,7 +107,7 @@ func (e *Engine) Cancel(ctx context.Context, req *engineGrpc.Order) (*engineGrpc
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
 	} else {
-		pairBook = engine.NewOrderBook()
+		pairBook = engine.NewOrderBook(nil)
 		e.book[req.GetPair()] = pairBook
 	}
 	e.mu.Unlock()
@@ -164,7 +164,7 @@ func (e *Engine) ProcessMarket(ctx context.Context, req *engineGrpc.Order) (*eng
 	if val, ok := e.book[req.GetPair()]; ok {
 		pairBook = val
 	} else {
-		pairBook = engine.NewOrderBook()
+		pairBook = engine.NewOrderBook(nil)
 		e.book[req.GetPair()] = pairBook
 	}
 	e.mu.Unlock()

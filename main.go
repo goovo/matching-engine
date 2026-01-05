@@ -7,6 +7,7 @@ import (
 
 	engineGrpc "github.com/goovo/matching-engine/engineGrpc"
 	"github.com/goovo/matching-engine/server"
+"github.com/goovo/matching-engine/consumer"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -20,6 +21,9 @@ func main() {
 	gs := grpc.NewServer()
 	cs := server.NewEngine()
 	engineGrpc.RegisterEngineServer(gs, cs)
+
+// Start RDMA Consumer (Shared Memory)
+consumer.StartRDMAConsumer(cs)
 
 	reflection.Register(gs)
 

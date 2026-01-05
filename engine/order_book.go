@@ -19,7 +19,7 @@ type OrderBook struct {
 	orders          map[string]IndexType // orderID -> Arena Index
 	Arena           *OrderArena          // 内存管理器
 	mutex           *sync.Mutex
-	listener        MatchingListener     // 事件回调接口
+	listener        MatchingListener // 事件回调接口
 }
 
 // Book 订单簿序列化结构
@@ -135,7 +135,7 @@ func (ob *OrderBook) String() string {
 			subNode := node.Data.(*OrderType).Tree.Root.SearchSubTree(i)
 			if subNode != nil {
 				vol := subNode.Data.(*OrderNode).Volume.Float64()
-				res += strconv.FormatFloat(vol, 'f', -1, 64) 
+				res += strconv.FormatFloat(vol, 'f', -1, 64)
 				orderSideSell = append(orderSideSell, res)
 			}
 		})
@@ -184,7 +184,7 @@ func NewOrderBook(listener MatchingListener) *OrderBook {
 		SellTree:        sTree,
 		orderLimitRange: 200000000,
 		orders:          make(map[string]IndexType),
-		Arena:           NewOrderArena(100000), // 默认 10w 容量
+		Arena:           NewOrderArena(1000000), // 默认 100w 容量
 		mutex:           &sync.Mutex{},
 		listener:        listener,
 	}
@@ -204,7 +204,7 @@ func (ob *OrderBook) addBuyOrder(order Order) {
 	startPoint := float64(int(math.Ceil(orderPrice)) / ob.orderLimitRange * ob.orderLimitRange)
 	endPoint := startPoint + float64(ob.orderLimitRange)
 	searchNodePrice := (startPoint + endPoint) / 2
-	
+
 	node := ob.BuyTree.Root.SearchSubTree(searchNodePrice)
 	if node != nil {
 		subTree := node.Data.(*OrderType)
@@ -220,7 +220,7 @@ func (ob *OrderBook) addBuyOrder(order Order) {
 		ob.BuyTree.Insert(searchNodePrice, orderTypeObj)
 	}
 	ob.orders[order.ID] = idx
-	
+
 	// 触发 Maker 事件
 	ob.listener.OnOrderAccepted(order.ID)
 }
@@ -239,7 +239,7 @@ func (ob *OrderBook) addSellOrder(order Order) {
 	startPoint := float64(int(math.Ceil(orderPrice)) / ob.orderLimitRange * ob.orderLimitRange)
 	endPoint := startPoint + float64(ob.orderLimitRange)
 	searchNodePrice := (startPoint + endPoint) / 2
-	
+
 	node := ob.SellTree.Root.SearchSubTree(searchNodePrice)
 	if node != nil {
 		subTree := node.Data.(*OrderType)
@@ -278,7 +278,7 @@ func (ob *OrderBook) removeOrder(order *Order) error {
 	startPoint := float64(int(math.Ceil(orderPrice)) / ob.orderLimitRange * ob.orderLimitRange)
 	endPoint := startPoint + float64(ob.orderLimitRange)
 	searchNodePrice := (startPoint + endPoint) / 2
-	
+
 	var node *binarytree.BinaryNode
 	if order.Type == Buy {
 		node = ob.BuyTree.Root.SearchSubTree(searchNodePrice)
